@@ -243,7 +243,7 @@ int main(void) {
 
         // 1. 顶部：已完成单词（带渐变消失效果）
         int draw_y = 50;
-        for (int i = current_word_index - 1; i >= 0 && i >= current_word_index - 5; i--) {
+        for (int i = (current_word_index - 5 < 0) ? 0 : current_word_index - 5; i < current_word_index; i++) {
             float alpha_factor = 1.0f - ((current_word_index - 1 - i) * 0.2f);
             Color done_color = (Color){ 100, 200, 100, (unsigned char)(255 * alpha_factor) };
             int fontSize = 25;
