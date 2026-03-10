@@ -1,2 +1,5 @@
+spellauncher-dev: spellauncher.c
+	gcc -DDEV spellauncher.c -o spellauncher-dev -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
+
 spellauncher: spellauncher.c
 	gcc spellauncher.c -o spellauncher -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
