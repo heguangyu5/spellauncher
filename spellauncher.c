@@ -5,6 +5,11 @@
 #include <glob.h>
 #include <math.h>
 
+#include "resources/SourceHanSansSC-Bold.ttf.h"
+#include "resources/type.wav.h"
+#include "resources/success.wav.h"
+#include "resources/error.wav.h"
+
 #define MAX_WORDS 1000
 #define MAX_WORD_LEN 100
 #define MAX_MEANING_LEN 256
@@ -142,14 +147,14 @@ int main(void) {
     // 按需加载字体纹理
     int codepointCount = 0;
     int *codepoints = GetRequiredCodepoints(&codepointCount);
-    chinese_font = LoadFontEx("resources/SourceHanSansSC-Bold.ttf", 64, codepoints, codepointCount); 
+    chinese_font = LoadFontFromMemory(".ttf", SourceHanSansSC_Bold_ttf, SourceHanSansSC_Bold_ttf_len, 64, codepoints, codepointCount); 
     free(codepoints);
     // 推荐开启双线性滤波：这样哪怕字号缩放，字体边缘依然平滑不会有马赛克
     SetTextureFilter(chinese_font.texture, TEXTURE_FILTER_BILINEAR);
     // 加载音效
-    sound_type = LoadSound("resources/type.wav");
-    sound_error = LoadSound("resources/error.wav");
-    sound_success = LoadSound("resources/success.wav");
+    sound_type = LoadSoundFromWave(LoadWaveFromMemory(".wav", type_wav, type_wav_len));
+    sound_error = LoadSoundFromWave(LoadWaveFromMemory(".wav", error_wav, error_wav_len));
+    sound_success = LoadSoundFromWave(LoadWaveFromMemory(".wav", success_wav, success_wav_len));
 
     SetTargetFPS(60);
 
