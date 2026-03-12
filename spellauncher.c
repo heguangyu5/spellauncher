@@ -12,6 +12,17 @@
 #include "resources/error.wav.h"
 #endif
 
+#define SCREEN_WIDTH    1400
+#define SCREEN_HEIGHT   800
+
+// 主题颜色
+Color bg_color      = (Color){ 30, 30, 36, 255 };
+Color box_color     = (Color){ 50, 50, 60, 255 };
+Color text_color    = (Color){ 240, 240, 240, 255 };
+Color meaning_color = (Color){ 180, 200, 255, 255 };
+Color error_color   = (Color){ 200, 50, 50, 255 };
+Color success_color = (Color){ 50, 200, 100, 255 };
+
 #define MAX_WORDS 1000
 #define MAX_WORD_LEN 100
 #define MAX_MEANING_LEN 256
@@ -25,14 +36,16 @@ WordItem words[MAX_WORDS];
 int word_count = 0;
 
 // 状态与输入
-int current_word_index = 0;
+int current_word_index = -1;
+WordItem *curr;
+int target_len;
 char user_input[MAX_WORD_LEN] = {0};
 int input_len = 0;
 
 // 动画状态
-float error_shake_timer = 0.0f;
+float error_shake_timer  = 0.0f;
 float success_anim_timer = 0.0f;
-bool is_transitioning = false;
+bool is_transitioning    = false;
 
 // 资源
 Font chinese_font;
@@ -58,6 +71,7 @@ void LoadWords() {
         perror("words.txt");
         exit(1);
     }
+
     char line[512];
     while (fgets(line, sizeof(line), f) && word_count < MAX_WORDS) {
         line[strcspn(line, "\r\n")] = 0;
@@ -70,6 +84,11 @@ void LoadWords() {
         }
     }
     fclose(f);
+
+    if (word_count == 0) {
+        fprintf(stderr, "words.txt empty!\n");
+        exit(2);
+    }
 }
 
 // 提取需要的字符（ASCII + 单词库中的中文 + 界面UI可能用到的中文）
@@ -126,6 +145,196 @@ int* GetRequiredCodepoints(int *count) {
     return codepoints;
 }
 
+void LoadFonts() {
+    int codepointCount = 0;
+    int *codepoints = GetRequiredCodepoints(&codepointCount);
+    #ifdef DEV
+    chinese_font = LoadFontEx("resources/SourceHanSansSC-Bold.ttf", 64, codepoints, codepointCount); 
+    #else
+    chinese_font = LoadFontFromMemory(".ttf", SourceHanSansSC_Bold_ttf, SourceHanSansSC_Bold_ttf_len, 64, codepoints, codepointCount); 
+    #endif
+    free(codepoints);
+    // 推荐开启双线性滤波：这样哪怕字号缩放，字体边缘依然平滑不会有马赛克
+    SetTextureFilter(chinese_font.texture, TEXTURE_FILTER_BILINEAR);
+}
+
+void LoadSounds() {
+    #ifdef DEV
+    sound_type    = LoadSound("resources/type.wav");
+    sound_error   = LoadSound("resources/error.wav");
+    sound_success = LoadSound("resources/success.wav");
+    #else
+    sound_type    = LoadSoundFromWave(LoadWaveFromMemory(".wav", type_wav, type_wav_len));
+    sound_error   = LoadSoundFromWave(LoadWaveFromMemory(".wav", error_wav, error_wav_len));
+    sound_success = LoadSoundFromWave(LoadWaveFromMemory(".wav", success_wav, success_wav_len));
+    #endif
+}
+
+void NextWord() {
+    is_transitioning = false;
+
+    current_word_index++;
+    curr = &words[current_word_index];
+    target_len = strlen(curr->word);
+
+    input_len = 0;
+    memset(user_input, 0, sizeof(user_input));
+}
+
+void HandleInput() {
+    if (is_transitioning) {
+        return;
+    }
+
+    // 获取键盘输入
+    int key = GetCharPressed();
+    while (key > 0) {
+        if ((key >= 32) && (key <= 126) && (input_len < target_len)) {
+            user_input[input_len] = (char)key;
+            input_len++;
+            PlaySound(sound_type);
+        }
+        key = GetCharPressed();
+    }
+
+    // 退格键
+    if (IsKeyPressed(KEY_BACKSPACE) && input_len > 0) {
+        input_len--;
+        user_input[input_len] = '\0';
+        PlaySound(sound_type);
+    }
+
+    // 检查单词是否填满
+    if (input_len == target_len) {
+        if (strcasecmp(user_input, curr->word) == 0) {
+            // 正确
+            is_transitioning = true;
+            success_anim_timer = 1.0f;
+            PlaySound(sound_success);
+        } else {
+            // 错误
+            error_shake_timer = 0.5f;
+            input_len = 0;
+            memset(user_input, 0, sizeof(user_input));
+            PlaySound(sound_error);
+        }
+    }
+}
+
+void UpdateTimer() {
+    // 更新动画计时器
+    if (error_shake_timer > 0) {
+        error_shake_timer -= GetFrameTime();
+    }
+    if (success_anim_timer > 0) {
+        success_anim_timer -= GetFrameTime();
+        if (success_anim_timer <= 0) {
+            // 动画结束，进入下一个单词
+            NextWord();
+        }
+    }
+}
+
+void DrawSpelledWords() {
+    // 顶部：已完成单词（带渐变消失效果）
+    // 显示最近的5个单词,顶部高度: 50 + 40 * 5 = 250
+    int draw_y = 50;
+    for (int i = (current_word_index - 5 < 0) ? 0 : current_word_index - 5; i < current_word_index; i++) {
+        float alpha_factor = 1.0f - ((current_word_index - 1 - i) * 0.2f);
+        Color done_color = (Color){ 100, 200, 100, (unsigned char)(255 * alpha_factor) };
+        int font_size = 25;
+        int text_width = MeasureText(words[i].word, font_size);
+        DrawText(words[i].word, SCREEN_WIDTH/2 - text_width/2, draw_y, font_size, done_color);
+        draw_y += 40;
+    }
+}
+
+void DrawCurrWord() {
+    // 中部：中文释义
+    // 开始高度: SCREEN_HEIGHT/2 - 100 = 400-100 = 300
+    Vector2 meaning_size = MeasureTextEx(chinese_font, curr->meaning, 50, 2);
+    DrawTextEx(chinese_font, curr->meaning,
+               (Vector2){ SCREEN_WIDTH/2 - meaning_size.x/2, SCREEN_HEIGHT/2 - 100 },
+               50, 2, meaning_color);
+
+    // 中下部：输入框
+    // 开始高度: SCREEN_HEIGHT / 2 = 400
+    int box_width = 80;
+    int box_height = 100;
+    int spacing = 15;
+    int total_width = (target_len * box_width) + ((target_len - 1) * spacing);
+    int start_x = SCREEN_WIDTH / 2 - total_width / 2;
+    int start_y = SCREEN_HEIGHT / 2;
+
+    // 震动偏移量
+    float offset_x = 0;
+    if (error_shake_timer > 0) {
+        offset_x = sin(error_shake_timer * 40.0f) * 10.0f; // 快速正弦波实现震动
+    }
+
+    for (int i = 0; i < target_len; i++) {
+        Rectangle rect = { start_x + i * (box_width + spacing) + offset_x, start_y, box_width, box_height };
+
+        Color current_box_color = box_color;
+        if (error_shake_timer > 0) current_box_color = error_color; // 错误闪红
+        if (success_anim_timer > 0) current_box_color = success_color; // 正确闪绿
+
+        // 绘制带有圆角的背景框
+        DrawRectangleRounded(rect, 0.2f, 10, current_box_color);
+
+        // 绘制输入的字母
+        if (i < input_len || (is_transitioning && i < target_len)) {
+            char letter[2] = { is_transitioning ? curr->word[i] : user_input[i], '\0' };
+            int letter_width = MeasureText(letter, 60);
+            DrawText(letter, rect.x + box_width/2 - letter_width/2, rect.y + 20, 60, text_color);
+        }
+    }
+}
+
+void DrawEncourageText() {
+    // 鼓励特效（正确时向上飘起的文字）
+    if (success_anim_timer <= 0) {
+        return;
+    }
+
+    int start_y                = SCREEN_HEIGHT / 2;
+    float anim_progress        = 1.0f - success_anim_timer; // 0.0 到 1.0
+    int float_y                = start_y - 50 - (int)(anim_progress * 100);
+    Color encourage_color      = (Color){ 255, 215, 0, (unsigned char)(255 * (1.0f - anim_progress)) }; // 金色并淡出
+    int encourage_text_index   = current_word_index % ENCOURAGE_TEXTS_COUNT;
+    const char *encourage_text = encourage_texts[encourage_text_index];
+    int font_size              = 50;
+    int spacing                = 2;
+    if (encourage_text_index < 3) {
+        int text_width = MeasureText(encourage_text, font_size);
+        DrawText(encourage_text, SCREEN_WIDTH/2 - text_width/2, float_y, font_size, encourage_color);
+    } else {
+        Vector2 text_size = MeasureTextEx(chinese_font, encourage_text, font_size, spacing);
+        DrawTextEx(chinese_font, encourage_text,
+                   (Vector2){ SCREEN_WIDTH/2 - text_size.x/2, float_y }, font_size, spacing, encourage_color);
+    }
+}
+
+void DrawProgress() {
+    // 底部：进度显示
+    int bar_width = 600;
+    int bar_height = 6;
+    int bar_x = SCREEN_WIDTH/2 - bar_width/2;
+    int bar_y = SCREEN_HEIGHT - 80;
+
+    // 进度条背景
+    DrawRectangleRounded((Rectangle){bar_x, bar_y, bar_width, bar_height}, 1.0f, 10, (Color){ 220, 230, 240, 255 });
+
+    // 进度条填充 (增加平滑过渡计算)
+    float progress = (float)current_word_index / word_count;
+    DrawRectangleRounded((Rectangle){bar_x, bar_y, bar_width * progress, bar_height}, 1.0f, 10, (Color){ 46, 204, 113, 255 });
+
+    // 进度文字
+    char progress_text[64];
+    snprintf(progress_text, sizeof(progress_text), "%d / %d", current_word_index, word_count);
+    DrawText(progress_text, bar_x + bar_width + 20, bar_y - 2, 10, GRAY);
+}
+
 // 启动 HMCL
 void LaunchHMCL() {
     glob_t glob_result;
@@ -141,44 +350,23 @@ int main(void) {
     #ifndef DEV
     SetConfigFlags(FLAG_WINDOW_UNDECORATED);
     #endif
-    // 1. 初始化窗口与音频
-    const int screenWidth = 1400;
-    const int screenHeight = 800;
-    InitWindow(screenWidth, screenHeight, "Spellauncher");
+
+    // 初始化窗口与音频
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Spellauncher");
     InitAudioDevice();
 
-    // 2. 加载资源 (需确保 resources 目录和文件存在)
+    // 加载资源
     // 先加载单词本，收集所有中文
     LoadWords();
     // 按需加载字体纹理
-    int codepointCount = 0;
-    int *codepoints = GetRequiredCodepoints(&codepointCount);
-    #ifdef DEV
-    chinese_font = LoadFontEx("resources/SourceHanSansSC-Bold.ttf", 64, codepoints, codepointCount); 
-    #else
-    chinese_font = LoadFontFromMemory(".ttf", SourceHanSansSC_Bold_ttf, SourceHanSansSC_Bold_ttf_len, 64, codepoints, codepointCount); 
-    #endif
-    free(codepoints);
-    // 推荐开启双线性滤波：这样哪怕字号缩放，字体边缘依然平滑不会有马赛克
-    SetTextureFilter(chinese_font.texture, TEXTURE_FILTER_BILINEAR);
+    LoadFonts();
     // 加载音效
-    #ifdef DEV
-    sound_type = LoadSound("resources/type.wav");
-    sound_error = LoadSound("resources/error.wav");
-    sound_success = LoadSound("resources/success.wav");
-    #else
-    sound_type = LoadSoundFromWave(LoadWaveFromMemory(".wav", type_wav, type_wav_len));
-    sound_error = LoadSoundFromWave(LoadWaveFromMemory(".wav", error_wav, error_wav_len));
-    sound_success = LoadSoundFromWave(LoadWaveFromMemory(".wav", success_wav, success_wav_len));
-    #endif
+    LoadSounds();
+
+    // 加载第一个单词
+    NextWord();
 
     SetTargetFPS(60);
-
-    // 主题颜色
-    Color bg_color = (Color){ 30, 30, 36, 255 };
-    Color box_color = (Color){ 50, 50, 60, 255 };
-    Color text_color = (Color){ 240, 240, 240, 255 };
-    Color meaning_color = (Color){ 180, 200, 255, 255 };
 
     while (!WindowShouldClose()) {
         if (current_word_index >= word_count) {
@@ -186,148 +374,18 @@ int main(void) {
             break; // 全部完成，退出循环
         }
 
-        WordItem *curr = &words[current_word_index];
-        int target_len = strlen(curr->word);
-
         // --- 逻辑处理 ---
-        if (!is_transitioning) {
-            // 获取键盘输入
-            int key = GetCharPressed();
-            while (key > 0) {
-                if ((key >= 32) && (key <= 125) && (input_len < target_len)) {
-                    user_input[input_len] = (char)key;
-                    input_len++;
-                    PlaySound(sound_type);
-                }
-                key = GetCharPressed();
-            }
-
-            // 退格键
-            if (IsKeyPressed(KEY_BACKSPACE) && input_len > 0) {
-                input_len--;
-                user_input[input_len] = '\0';
-                PlaySound(sound_type);
-            }
-
-            // 检查单词是否填满
-            if (input_len == target_len) {
-                if (strcasecmp(user_input, curr->word) == 0) {
-                    // 正确
-                    is_transitioning = true;
-                    success_anim_timer = 1.0f;
-                    PlaySound(sound_success);
-                } else {
-                    // 错误
-                    error_shake_timer = 0.5f;
-                    input_len = 0;
-                    memset(user_input, 0, sizeof(user_input));
-                    PlaySound(sound_error);
-                }
-            }
-        }
-
-        // 更新动画计时器
-        if (error_shake_timer > 0) error_shake_timer -= GetFrameTime();
-        if (success_anim_timer > 0) {
-            success_anim_timer -= GetFrameTime();
-            if (success_anim_timer <= 0) {
-                // 动画结束，进入下一个单词
-                is_transitioning = false;
-                current_word_index++;
-                input_len = 0;
-                memset(user_input, 0, sizeof(user_input));
-            }
-        }
+        HandleInput();
+        UpdateTimer();
 
         // --- 绘制渲染 ---
         BeginDrawing();
         ClearBackground(bg_color);
 
-        // 1. 顶部：已完成单词（带渐变消失效果）
-        int draw_y = 50;
-        for (int i = (current_word_index - 5 < 0) ? 0 : current_word_index - 5; i < current_word_index; i++) {
-            float alpha_factor = 1.0f - ((current_word_index - 1 - i) * 0.2f);
-            Color done_color = (Color){ 100, 200, 100, (unsigned char)(255 * alpha_factor) };
-            int fontSize = 25;
-            int textWidth = MeasureText(words[i].word, fontSize);
-            DrawText(words[i].word, screenWidth/2 - textWidth/2, draw_y, fontSize, done_color);
-            draw_y += 40;
-        }
-
-        // 2. 中部：中文释义
-        Vector2 meaning_size = MeasureTextEx(chinese_font, curr->meaning, 50, 2);
-        DrawTextEx(chinese_font, curr->meaning,
-                   (Vector2){ screenWidth/2 - meaning_size.x/2, screenHeight/2 - 100 },
-                   50, 2, meaning_color);
-
-        // 3. 中下部：输入框
-        int box_width = 80;
-        int box_height = 100;
-        int spacing = 15;
-        int total_width = (target_len * box_width) + ((target_len - 1) * spacing);
-        int start_x = screenWidth / 2 - total_width / 2;
-        int start_y = screenHeight / 2;
-
-        // 震动偏移量
-        float offset_x = 0;
-        if (error_shake_timer > 0) {
-            offset_x = sin(error_shake_timer * 40.0f) * 10.0f; // 快速正弦波实现震动
-        }
-
-        for (int i = 0; i < target_len; i++) {
-            Rectangle rect = { start_x + i * (box_width + spacing) + offset_x, start_y, box_width, box_height };
-
-            Color current_box_color = box_color;
-            if (error_shake_timer > 0) current_box_color = (Color){ 200, 50, 50, 255 }; // 错误闪红
-            if (success_anim_timer > 0) current_box_color = (Color){ 50, 200, 100, 255 }; // 正确闪绿
-
-            // 绘制带有圆角的背景框
-            DrawRectangleRounded(rect, 0.2f, 10, current_box_color);
-
-            // 绘制输入的字母
-            if (i < input_len || (is_transitioning && i < target_len)) {
-                char letter[2] = { is_transitioning ? curr->word[i] : user_input[i], '\0' };
-                int letter_width = MeasureText(letter, 60);
-                DrawText(letter, rect.x + box_width/2 - letter_width/2, rect.y + 20, 60, text_color);
-            }
-        }
-
-        // 4. 鼓励特效（正确时向上飘起的文字）
-        if (success_anim_timer > 0) {
-            float anim_progress = 1.0f - success_anim_timer; // 0.0 到 1.0
-            int float_y = start_y - 50 - (int)(anim_progress * 100);
-            Color encourage_color = (Color){ 255, 215, 0, (unsigned char)(255 * (1.0f - anim_progress)) }; // 金色并淡出
-            int encourage_text_index = current_word_index % ENCOURAGE_TEXTS_COUNT;
-            const char *encourage_text = encourage_texts[encourage_text_index];
-            int fontSize = 50;
-            int spacing = 2;
-            if (encourage_text_index < 3) {
-                int textWidth = MeasureText(encourage_text, fontSize);
-                DrawText(encourage_text, screenWidth/2 - textWidth/2, float_y, fontSize, encourage_color);
-            } else {
-                Vector2 text_size = MeasureTextEx(chinese_font, encourage_text, fontSize, spacing);
-                DrawTextEx(chinese_font, encourage_text,
-                           (Vector2){ screenWidth/2 - text_size.x/2, float_y }, fontSize, spacing, encourage_color);
-            }
-        }
-
-        // 5. 底部：进度显示
-        int bar_width = 600;
-        int bar_height = 6;
-        int bar_x = screenWidth/2 - bar_width/2;
-        int bar_y = screenHeight - 80;
-
-        // 进度条背景
-        DrawRectangleRounded((Rectangle){bar_x, bar_y, bar_width, bar_height}, 1.0f, 10, (Color){ 220, 230, 240, 255 });
-
-        // 进度条填充 (增加平滑过渡计算)
-        float progress = (word_count > 0) ? (float)current_word_index / word_count : 0;
-        DrawRectangleRounded((Rectangle){bar_x, bar_y, bar_width * progress, bar_height}, 1.0f, 10, (Color){ 46, 204, 113, 255 });
-
-        // 进度文字
-        char progress_text[64];
-        snprintf(progress_text, sizeof(progress_text), "%d / %d", current_word_index, word_count);
-        DrawText(progress_text, bar_x + bar_width + 20, bar_y - 2, 10, GRAY);
+        DrawSpelledWords();
+        DrawCurrWord();
+        DrawEncourageText();
+        DrawProgress();
 
         EndDrawing();
     }
