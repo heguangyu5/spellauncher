@@ -6,10 +6,14 @@
 #include <math.h>
 
 #ifndef DEV
-#include "resources/SourceHanSansSC-Bold.ttf.h"
-#include "resources/type.wav.h"
-#include "resources/success.wav.h"
-#include "resources/error.wav.h"
+extern const unsigned char chinese_font_start[];
+extern const unsigned char chinese_font_end[];
+extern const unsigned char type_wav_start[];
+extern const unsigned char type_wav_end[];
+extern const unsigned char error_wav_start[];
+extern const unsigned char error_wav_end[];
+extern const unsigned char success_wav_start[];
+extern const unsigned char success_wav_end[];
 #endif
 
 #define SCREEN_WIDTH    1400
@@ -151,7 +155,7 @@ void LoadFonts() {
     #ifdef DEV
     chinese_font = LoadFontEx("resources/SourceHanSansSC-Bold.ttf", 64, codepoints, codepointCount); 
     #else
-    chinese_font = LoadFontFromMemory(".ttf", SourceHanSansSC_Bold_ttf, SourceHanSansSC_Bold_ttf_len, 64, codepoints, codepointCount); 
+    chinese_font = LoadFontFromMemory(".ttf", chinese_font_start, chinese_font_end - chinese_font_start, 64, codepoints, codepointCount); 
     #endif
     free(codepoints);
     // 推荐开启双线性滤波：这样哪怕字号缩放，字体边缘依然平滑不会有马赛克
@@ -164,9 +168,9 @@ void LoadSounds() {
     sound_error   = LoadSound("resources/error.wav");
     sound_success = LoadSound("resources/success.wav");
     #else
-    sound_type    = LoadSoundFromWave(LoadWaveFromMemory(".wav", type_wav, type_wav_len));
-    sound_error   = LoadSoundFromWave(LoadWaveFromMemory(".wav", error_wav, error_wav_len));
-    sound_success = LoadSoundFromWave(LoadWaveFromMemory(".wav", success_wav, success_wav_len));
+    sound_type    = LoadSoundFromWave(LoadWaveFromMemory(".wav", type_wav_start, type_wav_end - type_wav_start));
+    sound_error   = LoadSoundFromWave(LoadWaveFromMemory(".wav", error_wav_start, error_wav_end - error_wav_start));
+    sound_success = LoadSoundFromWave(LoadWaveFromMemory(".wav", success_wav_start, success_wav_end - success_wav_start));
     #endif
 }
 
