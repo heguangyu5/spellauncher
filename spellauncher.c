@@ -138,7 +138,9 @@ void LaunchHMCL() {
 
 int main(void) {
     // 设置无边框标志
+    #ifndef DEV
     SetConfigFlags(FLAG_WINDOW_UNDECORATED);
+    #endif
     // 1. 初始化窗口与音频
     const int screenWidth = 1400;
     const int screenHeight = 800;
