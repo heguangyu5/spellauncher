@@ -1,4 +1,9 @@
 #include "raylib.h"
+
+#define RAYGUI_IMPLEMENTATION
+#define GUI_WINDOW_FILE_DIALOG_IMPLEMENTATION
+#include "gui_window_file_dialog.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +32,19 @@ Color meaning_color = (Color){ 180, 200, 255, 255 };
 Color error_color   = (Color){ 200, 50, 50, 255 };
 Color success_color = (Color){ 50, 200, 100, 255 };
 
+// 场景
+enum GameScene {
+    CHOOSE_WORDS,
+    SPELL,
+    LAUNCH
+};
+enum GameScene curScene = CHOOSE_WORDS;
+
+// 文件选择框
+GuiWindowFileDialogState fileDialogState = { 0 };
+bool fileDialogStateInited = false;
+
+// 单词本
 #define MAX_WORDS 1000
 #define MAX_WORD_LEN 100
 #define MAX_MEANING_LEN 256
@@ -53,6 +71,7 @@ bool is_transitioning    = false;
 
 // 资源
 Font chinese_font;
+bool chinese_font_loaded = false;
 Sound sound_type;
 Sound sound_error;
 Sound sound_success;
@@ -69,30 +88,27 @@ const char *encourage_texts[] = {
 #define ENCOURAGE_TEXTS_COUNT 6
 
 // 加载单词库
-void LoadWords() {
-    FILE *f = fopen("words.txt", "r");
-    if (!f) {
-        perror("words.txt");
-        exit(1);
-    }
+int LoadWords(const char *filename) {
+    word_count = 0;
+    current_word_index = -1;
 
-    char line[512];
-    while (fgets(line, sizeof(line), f) && word_count < MAX_WORDS) {
-        line[strcspn(line, "\r\n")] = 0;
-        char *tab = strchr(line, '\t');
-        if (tab) {
-            *tab = '\0';
-            strcpy(words[word_count].word, line);
-            strcpy(words[word_count].meaning, tab + 1);
-            word_count++;
+    FILE *f = fopen(filename, "r");
+    if (f) {
+        char line[512];
+        while (fgets(line, sizeof(line), f) && word_count < MAX_WORDS) {
+            line[strcspn(line, "\r\n")] = 0;
+            char *tab = strchr(line, '\t');
+            if (tab) {
+                *tab = '\0';
+                strcpy(words[word_count].word, line);
+                strcpy(words[word_count].meaning, tab + 1);
+                word_count++;
+            }
         }
+        fclose(f);
     }
-    fclose(f);
 
-    if (word_count == 0) {
-        fprintf(stderr, "words.txt empty!\n");
-        exit(2);
-    }
+    return word_count;
 }
 
 // 提取需要的字符（ASCII + 单词库中的中文 + 界面UI可能用到的中文）
@@ -150,6 +166,10 @@ int* GetRequiredCodepoints(int *count) {
 }
 
 void LoadFonts() {
+    if (chinese_font_loaded) {
+        UnloadFont(chinese_font);
+    }
+
     int codepointCount = 0;
     int *codepoints = GetRequiredCodepoints(&codepointCount);
     #ifdef DEV
@@ -158,6 +178,7 @@ void LoadFonts() {
     chinese_font = LoadFontFromMemory(".ttf", chinese_font_start, chinese_font_end - chinese_font_start, 64, codepoints, codepointCount); 
     #endif
     free(codepoints);
+    chinese_font_loaded = true;
     // 推荐开启双线性滤波：这样哪怕字号缩放，字体边缘依然平滑不会有马赛克
     SetTextureFilter(chinese_font.texture, TEXTURE_FILTER_BILINEAR);
 }
@@ -183,6 +204,10 @@ void NextWord() {
 
     input_len = 0;
     memset(user_input, 0, sizeof(user_input));
+    
+    if (current_word_index >= word_count) {
+        curScene = LAUNCH;
+    }
 }
 
 void HandleInput() {
@@ -349,6 +374,35 @@ void LaunchHMCL() {
     }
 }
 
+// 选择文件
+const char *ChooseFile(Rectangle pos, const char *ext) {
+    if (!fileDialogStateInited) {
+        fileDialogState       = InitGuiWindowFileDialog(GetWorkingDirectory());
+        fileDialogStateInited = true;
+    }
+
+    if (fileDialogState.SelectFilePressed) {
+        fileDialogState.SelectFilePressed = false;
+        if (IsFileExtension(fileDialogState.fileNameText, ext)) {
+            return TextFormat("%s" PATH_SEPERATOR "%s", fileDialogState.dirPathText, fileDialogState.fileNameText);
+        }
+    }
+
+    if (fileDialogState.windowActive) {
+        GuiLock();
+    }
+
+    if (GuiButton(pos, GuiIconText(ICON_FILE_OPEN, "Open"))) {
+        fileDialogState.windowActive = true;
+    }
+
+    GuiUnlock();
+
+    GuiWindowFileDialog(&fileDialogState);
+
+    return NULL;
+}
+
 int main(void) {
     // 设置无边框标志
     #ifndef DEV
@@ -359,39 +413,70 @@ int main(void) {
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Spellauncher");
     InitAudioDevice();
 
-    // 加载资源
-    // 先加载单词本，收集所有中文
-    LoadWords();
-    // 按需加载字体纹理
-    LoadFonts();
     // 加载音效
     LoadSounds();
 
-    // 加载第一个单词
-    NextWord();
+    // 尝试加载 words.txt
+    bool can_back = true;
+    if (LoadWords("words.txt") > 0) {
+        // 设置了默认单词表,不能返回自行选择
+        can_back = false;
+        // 按需加载字体纹理
+        LoadFonts();
+        // 加载第一个单词
+        NextWord();
+        // 开始SPELL
+        curScene = SPELL;
+    }
 
     SetTargetFPS(60);
 
     while (!WindowShouldClose()) {
-        if (current_word_index >= word_count) {
+        if (curScene == SPELL) {
+            // --- 逻辑处理 ---
+            HandleInput();
+            UpdateTimer();
+
+            // --- 绘制渲染 ---
+            BeginDrawing();
+            ClearBackground(bg_color);
+
+            DrawSpelledWords();
+            DrawCurrWord();
+            DrawEncourageText();
+            DrawProgress();
+
+            if (can_back) {
+                // 绘制返回按钮
+                if (GuiLabelButton((Rectangle){SCREEN_WIDTH - 70, 10, 60, 30}, GuiIconText(ICON_UNDO_FILL, "Back"))) {
+                    curScene = CHOOSE_WORDS;
+                }
+            }
+
+            EndDrawing();
+        } else if (curScene == CHOOSE_WORDS) {
+            // 找到 words.txt
+            BeginDrawing();
+            ClearBackground(bg_color);
+
+            int font_size = 25;
+            int text_width = MeasureText("Choose Your Word List", font_size);
+            DrawText("Choose Your Word List", SCREEN_WIDTH/2 - text_width/2, SCREEN_HEIGHT / 2 - 50, font_size, text_color);
+            const char *filename = ChooseFile((Rectangle){ SCREEN_WIDTH/2 - 70, SCREEN_HEIGHT/2, 140, 30 }, ".txt");
+            if (filename && LoadWords(filename) > 0) {
+                // 按需加载字体纹理
+                LoadFonts();
+                // 加载第一个单词
+                NextWord();
+                // 开始SPELL
+                curScene = SPELL;
+            }
+
+            EndDrawing();
+        } else {
             LaunchHMCL();
-            break; // 全部完成，退出循环
+            break;
         }
-
-        // --- 逻辑处理 ---
-        HandleInput();
-        UpdateTimer();
-
-        // --- 绘制渲染 ---
-        BeginDrawing();
-        ClearBackground(bg_color);
-
-        DrawSpelledWords();
-        DrawCurrWord();
-        DrawEncourageText();
-        DrawProgress();
-
-        EndDrawing();
     }
 
     // 清理资源
