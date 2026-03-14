@@ -385,7 +385,7 @@ void DrawEncourageText() {
 
 void DrawProgress() {
     // 底部：进度显示
-    int bar_width = 600;
+    int bar_width = 1200;
     int bar_height = 6;
     int bar_x = SCREEN_WIDTH/2 - bar_width/2;
     int bar_y = SCREEN_HEIGHT - 60;
