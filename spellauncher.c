@@ -21,8 +21,8 @@ extern const unsigned char success_wav_start[];
 extern const unsigned char success_wav_end[];
 #endif
 
-#define SCREEN_WIDTH    1400
-#define SCREEN_HEIGHT   800
+#define SCREEN_WIDTH    1600
+#define SCREEN_HEIGHT   900
 
 // 主题颜色
 Color bg_color      = (Color){ 30, 30, 36, 255 };
@@ -42,7 +42,6 @@ enum GameScene curScene = CHOOSE_WORDS;
 
 // 文件选择框
 GuiWindowFileDialogState fileDialogState = { 0 };
-bool fileDialogStateInited = false;
 
 // 单词本
 #define MAX_WORDS 1000
@@ -60,6 +59,8 @@ int word_count = 0;
 // 状态与输入
 int current_word_index = -1;
 WordItem *curr;
+bool curr_has_image = false;
+Texture2D curr_texture;
 int target_len;
 char user_input[MAX_WORD_LEN] = {0};
 int input_len = 0;
@@ -100,9 +101,11 @@ int LoadWords(const char *filename) {
             char *tab = strchr(line, '\t');
             if (tab) {
                 *tab = '\0';
-                strcpy(words[word_count].word, line);
-                strcpy(words[word_count].meaning, tab + 1);
-                word_count++;
+                if (strlen(line) < MAX_WORD_LEN && strlen(tab + 1) < MAX_MEANING_LEN) {
+                    strcpy(words[word_count].word, line);
+                    strcpy(words[word_count].meaning, tab + 1);
+                    word_count++;
+                }
             }
         }
         fclose(f);
@@ -207,6 +210,28 @@ void NextWord() {
     
     if (current_word_index >= word_count) {
         curScene = LAUNCH;
+    } else {
+        if (curr_has_image) {
+            UnloadTexture(curr_texture);
+        }
+        char tmp[MAX_WORD_LEN];
+        char *tp = tmp;
+        char *p = curr->word;
+        while (*p) {
+            if (*p == ' ') {
+                *tp = '_';
+            } else {
+                *tp = *p;
+            }
+            p++;
+            tp++;
+        }
+        *tp = 0;
+        const char *image = TextFormat("%s" PATH_SEPERATOR "images" PATH_SEPERATOR "%s.png", fileDialogState.dirPathText, tmp);
+        curr_has_image = FileExists(image);
+        if (curr_has_image) {
+            curr_texture = LoadTexture(image);
+        }
     }
 }
 
@@ -278,22 +303,36 @@ void DrawSpelledWords() {
     }
 }
 
+void DrawCurrWordImage() {
+    if (curr_has_image) {
+        // y: 550
+        float scale = 200.0f / curr_texture.height;
+        DrawTextureEx(
+            curr_texture, 
+            (Vector2){ SCREEN_WIDTH/2 - curr_texture.width * scale / 2, 550 },
+            0.0f,
+            scale,
+            WHITE
+        );
+    }
+}
+
 void DrawCurrWord() {
     // 中部：中文释义
-    // 开始高度: SCREEN_HEIGHT/2 - 100 = 400-100 = 300
+    // y: 300 ~ 350
     Vector2 meaning_size = MeasureTextEx(chinese_font, curr->meaning, 50, 2);
     DrawTextEx(chinese_font, curr->meaning,
-               (Vector2){ SCREEN_WIDTH/2 - meaning_size.x/2, SCREEN_HEIGHT/2 - 100 },
+               (Vector2){ SCREEN_WIDTH/2 - meaning_size.x/2, 300 },
                50, 2, meaning_color);
 
     // 中下部：输入框
-    // 开始高度: SCREEN_HEIGHT / 2 = 400
+    // y: 400 ~ 500
     int box_width = 80;
     int box_height = 100;
     int spacing = 15;
     int total_width = (target_len * box_width) + ((target_len - 1) * spacing);
     int start_x = SCREEN_WIDTH / 2 - total_width / 2;
-    int start_y = SCREEN_HEIGHT / 2;
+    int start_y = 400;
 
     // 震动偏移量
     float offset_x = 0;
@@ -326,7 +365,7 @@ void DrawEncourageText() {
         return;
     }
 
-    int start_y                = SCREEN_HEIGHT / 2;
+    int start_y                = 400;
     float anim_progress        = 1.0f - success_anim_timer; // 0.0 到 1.0
     int float_y                = start_y - 50 - (int)(anim_progress * 100);
     Color encourage_color      = (Color){ 255, 215, 0, (unsigned char)(255 * (1.0f - anim_progress)) }; // 金色并淡出
@@ -349,7 +388,7 @@ void DrawProgress() {
     int bar_width = 600;
     int bar_height = 6;
     int bar_x = SCREEN_WIDTH/2 - bar_width/2;
-    int bar_y = SCREEN_HEIGHT - 80;
+    int bar_y = SCREEN_HEIGHT - 60;
 
     // 进度条背景
     DrawRectangleRounded((Rectangle){bar_x, bar_y, bar_width, bar_height}, 1.0f, 10, (Color){ 220, 230, 240, 255 });
@@ -376,11 +415,6 @@ void LaunchHMCL() {
 
 // 选择文件
 const char *ChooseFile(Rectangle pos, const char *ext) {
-    if (!fileDialogStateInited) {
-        fileDialogState       = InitGuiWindowFileDialog(GetWorkingDirectory());
-        fileDialogStateInited = true;
-    }
-
     if (fileDialogState.SelectFilePressed) {
         fileDialogState.SelectFilePressed = false;
         if (IsFileExtension(fileDialogState.fileNameText, ext)) {
@@ -416,6 +450,9 @@ int main(void) {
     // 加载音效
     LoadSounds();
 
+    // 初始化文件选择框状态
+    fileDialogState = InitGuiWindowFileDialog(GetWorkingDirectory());
+
     // 尝试加载 words.txt
     bool can_back = true;
     if (LoadWords("words.txt") > 0) {
@@ -442,6 +479,7 @@ int main(void) {
             ClearBackground(bg_color);
 
             DrawSpelledWords();
+            DrawCurrWordImage();
             DrawCurrWord();
             DrawEncourageText();
             DrawProgress();
