@@ -437,6 +437,209 @@ const char *ChooseFile(Rectangle pos, const char *ext) {
     return NULL;
 }
 
+// 烟花秀
+typedef struct {
+    Vector2 position;
+    Vector2 velocity;
+    Color color;
+    float life;
+    float maxLife;
+    float size;
+    bool active;
+    bool flicker;
+} Particle;
+
+typedef struct {
+    Vector2 position;
+    Vector2 velocity;
+    Color color;
+    bool exploded;
+    bool active;
+    int type; 
+    float flashRadius;
+    Particle *particles; // 动态分配粒子数组
+    int particleCount;
+} Firework;
+
+void InitFirework(Firework *f, int pCount, int screenWidth, int screenHeight, int typeRange) {
+    f->active = true;
+    f->exploded = false;
+    f->flashRadius = 0;
+    f->particleCount = pCount;
+    f->particles = (Particle *)calloc(pCount, sizeof(Particle));
+    f->type = GetRandomValue(0, typeRange);
+    f->position = (Vector2){ (float)GetRandomValue(200, screenWidth - 200), (float)screenHeight };
+    f->velocity = (Vector2){ (float)GetRandomValue(-100, 100), (float)GetRandomValue(-1100, -750) };
+    f->color = ColorFromHSV((float)GetRandomValue(0, 360), 0.8f, 1.0f);
+}
+
+void CleanFirework(Firework *f) {
+    if (f->particles) free(f->particles);
+}
+
+// --- 版本 1: 经典款 (Classic) - 简洁明快 ---
+void ShowFireworkClassic(int sw, int sh) {
+    const int maxF = 15;
+    const int pPerF = 100;
+    Firework f[15] = {0};
+    float start = GetTime();
+
+    while (GetTime() - start < 10.0 && !WindowShouldClose()) {
+        if (GetRandomValue(1, 100) <= 5) {
+            for(int i=0; i<maxF; i++) if(!f[i].active) { InitFirework(&f[i], pPerF, sw, sh, 0); break; }
+        }
+        BeginDrawing();
+        ClearBackground(BLACK);
+        for(int i=0; i<maxF; i++) {
+            if(!f[i].active) continue;
+            float dt = GetFrameTime();
+            if(!f[i].exploded) {
+                f[i].position.y += f[i].velocity.y * dt; f[i].velocity.y += 400.0f * dt;
+                DrawCircleV(f[i].position, 4.0f, f[i].color);
+                if(f[i].velocity.y >= 0) {
+                    f[i].exploded = true;
+                    for(int p=0; p<pPerF; p++) {
+                        f[i].particles[p].active = true; f[i].particles[p].position = f[i].position;
+                        float ang = GetRandomValue(0, 360)*DEG2RAD, spd = GetRandomValue(50, 300);
+                        f[i].particles[p].velocity = (Vector2){cosf(ang)*spd, sinf(ang)*spd};
+                        f[i].particles[p].life = 1.0f; f[i].particles[p].color = f[i].color;
+                    }
+                }
+            } else {
+                bool alive = false;
+                for(int p=0; p<pPerF; p++) {
+                    if(!f[i].particles[p].active) continue;
+                    alive = true;
+                    f[i].particles[p].position.x += f[i].particles[p].velocity.x * dt;
+                    f[i].particles[p].position.y += f[i].particles[p].velocity.y * dt;
+                    f[i].particles[p].life -= dt;
+                    DrawCircleV(f[i].particles[p].position, 2.0f, Fade(f[i].particles[p].color, f[i].particles[p].life));
+                    if(f[i].particles[p].life <= 0) f[i].particles[p].active = false;
+                }
+                if(!alive) { CleanFirework(&f[i]); f[i].active = false; }
+            }
+        }
+        DrawText("GREAT JOB!", sw/2 - 100, sh/2, 40, RAYWHITE);
+        EndDrawing();
+    }
+}
+
+// --- 版本 2: 灵动款 (Vibrant) - 带有流光残影和加法混合 ---
+void ShowFireworkVibrant(int sw, int sh) {
+    const int maxF = 25;
+    const int pPerF = 200;
+    Firework f[25] = {0};
+    float start = GetTime();
+
+    while (GetTime() - start < 10.0 && !WindowShouldClose()) {
+        if (GetRandomValue(1, 100) <= 7) {
+            for(int i=0; i<maxF; i++) if(!f[i].active) { InitFirework(&f[i], pPerF, sw, sh, 2); break; }
+        }
+        BeginDrawing();
+        DrawRectangle(0, 0, sw, sh, (Color){0, 0, 0, 40});
+        BeginBlendMode(BLEND_ADDITIVE);
+        for(int i=0; i<maxF; i++) {
+            if(!f[i].active) continue;
+            float dt = GetFrameTime();
+            if(!f[i].exploded) {
+                f[i].position.x += f[i].velocity.x*dt; f[i].position.y += f[i].velocity.y*dt; f[i].velocity.y += 450.0f*dt;
+                DrawCircleV(f[i].position, 5.0f, f[i].color);
+                if(f[i].velocity.y >= -20) {
+                    f[i].exploded = true;
+                    for(int p=0; p<pPerF; p++) {
+                        f[i].particles[p].active = true; f[i].particles[p].position = f[i].position;
+                        float ang = GetRandomValue(0, 360)*DEG2RAD, spd = GetRandomValue(100, 450);
+                        f[i].particles[p].velocity = (Vector2){cosf(ang)*spd, sinf(ang)*spd};
+                        f[i].particles[p].maxLife = (float)GetRandomValue(10, 20)/10.0f; f[i].particles[p].life = f[i].particles[p].maxLife;
+                        f[i].particles[p].color = f[i].color;
+                    }
+                }
+            } else {
+                bool alive = false;
+                for(int p=0; p<pPerF; p++) {
+                    if(!f[i].particles[p].active) continue;
+                    alive = true;
+                    f[i].particles[p].velocity.y += 100.0f*dt;
+                    f[i].particles[p].position.x += f[i].particles[p].velocity.x*dt;
+                    f[i].particles[p].position.y += f[i].particles[p].velocity.y*dt;
+                    f[i].particles[p].life -= dt;
+                    DrawCircleV(f[i].particles[p].position, 3.0f * (f[i].particles[p].life/f[i].particles[p].maxLife), Fade(f[i].particles[p].color, f[i].particles[p].life/f[i].particles[p].maxLife));
+                    if(f[i].particles[p].life <= 0) f[i].particles[p].active = false;
+                }
+                if(!alive) { CleanFirework(&f[i]); f[i].active = false; }
+            }
+        }
+        EndBlendMode();
+        DrawText("WELL DONE!", sw/2 - 120, sh/3, 50, GOLD);
+        EndDrawing();
+    }
+}
+
+// --- 版本 3: 豪华款 (Grand) - 针对 1600x900 优化的海量粒子与闪烁 ---
+void ShowFireworkGrand(int sw, int sh) {
+    const int maxF = 40;
+    const int pPerF = 400;
+    Firework f[40] = {0};
+    float start = GetTime();
+
+    while (GetTime() - start < 10.0 && !WindowShouldClose()) {
+        float elapsed = GetTime() - start;
+        int chance = (elapsed > 7.0f) ? 18 : 8;
+        if (GetRandomValue(1, 100) <= chance) {
+            for(int i=0; i<maxF; i++) if(!f[i].active) { InitFirework(&f[i], pPerF, sw, sh, 3); break; }
+        }
+        BeginDrawing();
+        DrawRectangle(0, 0, sw, sh, (Color){5, 5, 15, 30});
+        BeginBlendMode(BLEND_ADDITIVE);
+        for(int i=0; i<maxF; i++) {
+            if(!f[i].active) continue;
+            float dt = GetFrameTime();
+            if(!f[i].exploded) {
+                f[i].position.y += f[i].velocity.y*dt; f[i].velocity.y += 500.0f*dt;
+                DrawCircleV(f[i].position, 6.0f, WHITE);
+                if(f[i].velocity.y >= -10) {
+                    f[i].exploded = true; f[i].flashRadius = 200.0f;
+                    for(int p=0; p<pPerF; p++) {
+                        f[i].particles[p].active = true; f[i].particles[p].position = f[i].position;
+                        float ang = GetRandomValue(0, 360)*DEG2RAD, spd = GetRandomValue(50, 600);
+                        f[i].particles[p].velocity = (Vector2){cosf(ang)*spd, sinf(ang)*spd};
+                        f[i].particles[p].maxLife = (float)GetRandomValue(15, 35)/10.0f; f[i].particles[p].life = f[i].particles[p].maxLife;
+                        f[i].particles[p].color = f[i].color; f[i].particles[p].flicker = (GetRandomValue(1,10)>7);
+                    }
+                }
+            } else {
+                bool alive = false;
+                if(f[i].flashRadius > 0) { DrawCircleV(f[i].position, f[i].flashRadius, Fade(f[i].color, 0.2f)); f[i].flashRadius -= 600.0f*dt; }
+                for(int p=0; p<pPerF; p++) {
+                    if(!f[i].particles[p].active) continue;
+                    alive = true;
+                    f[i].particles[p].velocity.x *= 0.97f; f[i].particles[p].velocity.y *= 0.97f; f[i].particles[p].velocity.y += 90.0f*dt;
+                    f[i].particles[p].position.x += f[i].particles[p].velocity.x*dt; f[i].particles[p].position.y += f[i].particles[p].velocity.y*dt;
+                    f[i].particles[p].life -= dt;
+                    Color pCol = Fade(f[i].particles[p].color, f[i].particles[p].life/f[i].particles[p].maxLife);
+                    if(f[i].particles[p].flicker && GetRandomValue(1,10)>5) pCol = WHITE;
+                    DrawCircleV(f[i].particles[p].position, 4.0f * (f[i].particles[p].life/f[i].particles[p].maxLife), pCol);
+                    if(f[i].particles[p].life <= 0) f[i].particles[p].active = false;
+                }
+                if(!alive) { CleanFirework(&f[i]); f[i].active = false; }
+            }
+        }
+        EndBlendMode();
+        DrawText("CONGRATULATIONS!", sw/2 - 250, sh/2 - 30, 60, GOLD);
+        EndDrawing();
+    }
+}
+
+void PlayRandomVictoryShow(int sw, int sh) {
+    int choice = GetRandomValue(0, 2);
+
+    switch(choice) {
+        case 0: ShowFireworkClassic(sw, sh); break;
+        case 1: ShowFireworkVibrant(sw, sh); break;
+        case 2: ShowFireworkGrand(sw, sh); break;
+    }
+}
+
 int main(void) {
     // 设置无边框标志
     #ifndef DEV
@@ -512,6 +715,7 @@ int main(void) {
 
             EndDrawing();
         } else {
+            PlayRandomVictoryShow(SCREEN_WIDTH, SCREEN_HEIGHT);
             LaunchHMCL();
             break;
         }
