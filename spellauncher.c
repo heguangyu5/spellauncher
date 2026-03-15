@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <glob.h>
 #include <math.h>
 
 #ifndef DEV
@@ -403,16 +402,6 @@ void DrawProgress() {
     DrawText(progress_text, bar_x + bar_width + 20, bar_y - 2, 10, GRAY);
 }
 
-// 启动 HMCL
-void LaunchHMCL() {
-    glob_t glob_result;
-    if (glob("./HMCL-*.jar", 0, NULL, &glob_result) == 0) {
-        char cmd[512];
-        snprintf(cmd, sizeof(cmd), "java -jar \"%s\" &", glob_result.gl_pathv[0]);
-        system(cmd);
-    }
-}
-
 // 选择文件
 const char *ChooseFile(Rectangle pos, const char *ext) {
     if (fileDialogState.SelectFilePressed) {
@@ -640,7 +629,7 @@ void PlayRandomVictoryShow(int sw, int sh) {
     }
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
     // 设置无边框标志
     #ifndef DEV
     SetConfigFlags(FLAG_WINDOW_UNDECORATED);
@@ -716,7 +705,9 @@ int main(void) {
             EndDrawing();
         } else {
             PlayRandomVictoryShow(SCREEN_WIDTH, SCREEN_HEIGHT);
-            LaunchHMCL();
+            if (argc > 1) {
+                system(argv[1]);
+            }
             break;
         }
     }
