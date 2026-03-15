@@ -321,8 +321,11 @@ void DrawSpelledWords() {
         float alpha_factor = 1.0f - ((current_word_index - 1 - i) * 0.2f);
         Color done_color = (Color){ 100, 200, 100, (unsigned char)(255 * alpha_factor) };
         int font_size = 25;
+        Vector2 meaning_size = MeasureTextEx(chinese_font, words[i].meaning, font_size, 2);
         int text_width = MeasureText(words[i].word, font_size);
-        DrawText(words[i].word, SCREEN_WIDTH/2 - text_width/2, draw_y, font_size, done_color);
+        int draw_x = SCREEN_WIDTH/2 - (meaning_size.x + text_width)/2 - 10;
+        DrawTextEx(chinese_font, words[i].meaning, (Vector2){ draw_x, draw_y }, font_size, 2, done_color);
+        DrawText(words[i].word, draw_x + meaning_size.x + 10, draw_y, font_size, done_color);
         draw_y += 40;
     }
 }
