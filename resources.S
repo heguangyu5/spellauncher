@@ -32,4 +32,6 @@ success_wav_start:
 .incbin "resources/success.wav"
 success_wav_end:
 
+#ifdef __ELF__
 .section .note.GNU-stack,"",@progbits
+#endif

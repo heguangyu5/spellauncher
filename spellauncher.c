@@ -1,3 +1,28 @@
+#ifdef _WIN32
+    // 提前定义这些宏，告诉 Windows "我不需要你那些庞大且老旧的图形界面组件"
+    // 这能从源头上掐断 90% 的命名冲突，还能加快编译速度
+    #define WIN32_LEAN_AND_MEAN
+    #define NOGDI       // 屏蔽 GDI (解决 Rectangle 冲突)
+    #define NOUSER      // 屏蔽 USER (解决 CloseWindow, ShowCursor 冲突)
+    
+    // 包含所需的 Windows 头文件
+    #include <windows.h>
+    #include <shellapi.h>
+    
+    // 手动补全被 NOUSER 屏蔽掉的必要常量
+    #ifndef SW_SHOWNORMAL
+        #define SW_SHOWNORMAL 1
+    #endif
+
+    // 2. 核心防御：暴力卸载可能的残留宏/符号
+    // 即使上面定义了 NOGDI 和 NOUSER，某些 Windows 版本依然可能漏网
+    // 用 #undef 强制解除占用，把这些名字"还给" raylib
+    #undef Rectangle
+    #undef CloseWindow
+    #undef ShowCursor
+    #undef PlaySound
+#endif
+
 #include "raylib.h"
 
 #define RAYGUI_IMPLEMENTATION
@@ -706,7 +731,11 @@ int main(int argc, char *argv[]) {
         } else {
             PlayRandomVictoryShow(SCREEN_WIDTH, SCREEN_HEIGHT);
             if (argc > 1) {
+                #ifdef _WIN32
+                ShellExecuteA(NULL, "open", argv[1], NULL, NULL, SW_SHOWNORMAL);
+                #else
                 system(argv[1]);
+                #endif
             }
             break;
         }
